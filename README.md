@@ -35,4 +35,28 @@ Set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000` when backend runs elsewhere
 
 ```bash
 PYTHONPATH=backend python3 -m unittest discover -s backend/tests -v
+node --test integrations/openclaw/openclaw-adapter.test.mjs
+npm --prefix frontend run build
+```
+
+## OpenClaw Adapter
+
+The OpenClaw adapter wraps OpenClaw-compatible tools at the `execute` boundary.
+
+```js
+import { OpenClawAdapter } from "./integrations/openclaw/openclaw-adapter.mjs";
+
+const adapter = new OpenClawAdapter({
+  runId,
+  apiBaseUrl: "http://127.0.0.1:8000",
+});
+
+const guardedTools = adapter.wrapTools(openClawTools);
+```
+
+Run the malicious-site demo after starting the backend:
+
+```bash
+PYTHONPATH=backend python3 -m uvicorn cortex_shield.api:app --port 8000
+node integrations/openclaw/malicious-site-demo.mjs
 ```

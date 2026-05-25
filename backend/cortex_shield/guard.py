@@ -19,6 +19,12 @@ class CortexGuard:
         self.risk_engine = risk_engine or RiskEngine()
         self.policy_engine = policy_engine or PolicyEngine()
 
+    def check(self, run_id: str, tool_call: ToolCall) -> ExecutionResult:
+        assessment = self.risk_engine.assess(tool_call)
+        decision = self.policy_engine.decide(tool_call, assessment)
+        event = self.store.record_event(run_id, tool_call, assessment, decision)
+        return ExecutionResult(event=event, assessment=assessment, decision=decision)
+
     def execute(
         self,
         run_id: str,

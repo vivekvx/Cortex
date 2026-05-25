@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from cortex_shield.guard import CortexGuard
 from cortex_shield.models import ToolCall
@@ -20,7 +20,12 @@ class ToolCallRequest(BaseModel):
     run_id: str
     tool: str
     action: str
-    payload: Dict[str, Any] = {}
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ToolResultRequest(BaseModel):
+    output: Any = None
+    error: Optional[str] = None
 
 
 class ApprovalRequest(BaseModel):
@@ -71,6 +76,27 @@ def create_app(store: TraceStore | None = None) -> FastAPI:
             executor=lambda call: {"status": "simulated", "tool": call.tool.value, "action": call.action},
         )
         return result.to_dict()
+
+    @app.post("/guard/check")
+    def guard_check(request: ToolCallRequest) -> Dict[str, Any]:
+        if trace_store.get_run(request.run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        tool_call = ToolCall.from_dict(request.model_dump(exclude={"run_id"}))
+        return guard.check(run_id=request.run_id, tool_call=tool_call).to_dict()
+
+    @app.get("/events/{event_id}")
+    def get_event(event_id: str) -> Dict[str, Any]:
+        event = trace_store.get_event(event_id)
+        if event is None:
+            raise HTTPException(status_code=404, detail="event not found")
+        return event.to_dict()
+
+    @app.post("/events/{event_id}/result")
+    def record_result(event_id: str, request: ToolResultRequest) -> Dict[str, Any]:
+        event = trace_store.record_result(event_id, output=request.output, error=request.error)
+        if event is None:
+            raise HTTPException(status_code=404, detail="event not found")
+        return event.to_dict()
 
     @app.get("/approvals")
     def pending_approvals() -> Dict[str, Any]:

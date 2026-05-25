@@ -1,0 +1,12 @@
+{
+  "name": "@cortex-shield/openclaw-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./openclaw-adapter.mjs",
+  "types": "./openclaw-adapter.d.ts",
+  "scripts": {
+    "test": "node --test openclaw-adapter.test.mjs",
+    "demo:malicious-site": "node malicious-site-demo.mjs"
+  }
+}

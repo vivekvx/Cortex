@@ -91,6 +91,19 @@ class TraceStore:
             row = db.execute("select * from events where id = ?", (event_id,)).fetchone()
         return self._event_from_row(row) if row else None
 
+    def record_result(
+        self,
+        event_id: str,
+        output: Optional[Any] = None,
+        error: Optional[str] = None,
+    ) -> Optional[TraceEvent]:
+        with self._connect() as db:
+            db.execute(
+                "update events set output = ?, error = ? where id = ?",
+                (json.dumps(output), error, event_id),
+            )
+        return self.get_event(event_id)
+
     def pending_approvals(self) -> List[TraceEvent]:
         with self._connect() as db:
             rows = db.execute(
