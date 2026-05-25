@@ -29,6 +29,7 @@ export class OpenClawAdapter {
     }
     this.runId = options.runId;
     this.apiBaseUrl = trimTrailingSlash(options.apiBaseUrl ?? DEFAULT_API_BASE_URL);
+    this.apiToken = options.apiToken ?? process.env.CORTEX_API_TOKEN;
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
@@ -122,7 +123,7 @@ export class OpenClawAdapter {
   async postJson(path, body) {
     const response = await this.fetchImpl(`${this.apiBaseUrl}${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: this.headers({ "content-type": "application/json" }),
       body: JSON.stringify(body),
     });
     return await readJsonResponse(response);
@@ -131,9 +132,16 @@ export class OpenClawAdapter {
   async getJson(path) {
     const response = await this.fetchImpl(`${this.apiBaseUrl}${path}`, {
       method: "GET",
-      headers: { accept: "application/json" },
+      headers: this.headers({ accept: "application/json" }),
     });
     return await readJsonResponse(response);
+  }
+
+  headers(base) {
+    if (!this.apiToken) {
+      return base;
+    }
+    return { ...base, authorization: `Bearer ${this.apiToken}` };
   }
 }
 

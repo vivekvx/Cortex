@@ -34,6 +34,7 @@ type TraceEvent = {
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_TOKEN = process.env.NEXT_PUBLIC_CORTEX_API_TOKEN;
 
 const demoActions = [
   {
@@ -81,27 +82,27 @@ export default function Home() {
   }, [selectedRun]);
 
   async function refreshRuns() {
-    const response = await fetch(`${API_BASE}/runs`, { cache: "no-store" });
+    const response = await apiFetch("/runs", { cache: "no-store" });
     const data = await response.json();
     setRuns(data.runs);
     setSelectedRun((current) => current || data.runs[0]?.id || "");
   }
 
   async function refreshEvents(runId: string) {
-    const response = await fetch(`${API_BASE}/runs/${runId}/events`, { cache: "no-store" });
+    const response = await apiFetch(`/runs/${runId}/events`, { cache: "no-store" });
     const data = await response.json();
     setEvents(data.events);
   }
 
   async function refreshApprovals() {
-    const response = await fetch(`${API_BASE}/approvals`, { cache: "no-store" });
+    const response = await apiFetch("/approvals", { cache: "no-store" });
     const data = await response.json();
     setApprovals(data.approvals);
   }
 
   async function createRun() {
     setBusy(true);
-    const response = await fetch(`${API_BASE}/runs`, {
+    const response = await apiFetch("/runs", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name: `OpenClaw demo ${new Date().toLocaleTimeString()}` }),
@@ -115,7 +116,7 @@ export default function Home() {
   async function simulateAction(action: (typeof demoActions)[number]) {
     if (!selectedRun) return;
     setBusy(true);
-    await fetch(`${API_BASE}/guard/execute`, {
+    await apiFetch("/guard/execute", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ run_id: selectedRun, ...action }),
@@ -126,7 +127,7 @@ export default function Home() {
   }
 
   async function resolveApproval(eventId: string, approved: boolean) {
-    await fetch(`${API_BASE}/approvals/${eventId}`, {
+    await apiFetch(`/approvals/${eventId}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ approved }),
@@ -237,6 +238,21 @@ export default function Home() {
       </section>
     </main>
   );
+}
+
+function apiFetch(path: string, init: RequestInit = {}) {
+  return fetch(`${API_BASE}${path}`, {
+    ...init,
+    headers: authHeaders(init.headers),
+  });
+}
+
+function authHeaders(headers: HeadersInit | undefined): HeadersInit {
+  const merged = new Headers(headers);
+  if (API_TOKEN) {
+    merged.set("authorization", `Bearer ${API_TOKEN}`);
+  }
+  return merged;
 }
 
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {

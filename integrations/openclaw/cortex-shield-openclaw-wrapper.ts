@@ -12,6 +12,7 @@ type CortexTool = {
 type CortexOptions = {
   runId?: string;
   apiBaseUrl?: string;
+  apiToken?: string;
   enabled?: boolean;
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
@@ -56,6 +57,7 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
   const apiBaseUrl = trimTrailingSlash(
     options.apiBaseUrl ?? process.env.CORTEX_API_BASE_URL ?? DEFAULT_API_BASE_URL,
   );
+  const apiToken = options.apiToken ?? process.env.CORTEX_API_TOKEN;
   const approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
   const approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
 
@@ -63,7 +65,10 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
     ...tool,
     async execute(toolCallId, params, signal, onUpdate) {
       const mappedCall = mapOpenClawToolCall(tool.name, params);
-      const check = await postJson(apiBaseUrl, "/guard/check", { run_id: runId, ...mappedCall });
+      const check = await postJson(apiBaseUrl, apiToken, "/guard/check", {
+        run_id: runId,
+        ...mappedCall,
+      });
       const decision = readDecisionAction(check);
       const eventId = readEventId(check);
 
@@ -72,13 +77,13 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
       }
 
       if (decision === "require_approval") {
-        await waitForApproval(apiBaseUrl, eventId, approvalPollMs, approvalTimeoutMs, signal);
+        await waitForApproval(apiBaseUrl, apiToken, eventId, approvalPollMs, approvalTimeoutMs, signal);
       }
 
       try {
         const output = await tool.execute(toolCallId, params, signal, onUpdate);
         if (tool.name === "browser") {
-          const outputCheck = await postJson(apiBaseUrl, "/guard/check", {
+          const outputCheck = await postJson(apiBaseUrl, apiToken, "/guard/check", {
             run_id: runId,
             tool: "browser",
             action: "result",
@@ -86,17 +91,17 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
           });
           if (readDecisionAction(outputCheck) === "block") {
             const reason = readDecisionReason(outputCheck) ?? "browser output blocked by Cortex Shield";
-            await postJson(apiBaseUrl, `/events/${encodeURIComponent(eventId)}/result`, {
+            await postJson(apiBaseUrl, apiToken, `/events/${encodeURIComponent(eventId)}/result`, {
               error: reason,
             });
             throw new Error(reason);
           }
         }
 
-        await postJson(apiBaseUrl, `/events/${encodeURIComponent(eventId)}/result`, { output });
+        await postJson(apiBaseUrl, apiToken, `/events/${encodeURIComponent(eventId)}/result`, { output });
         return output;
       } catch (error) {
-        await postJson(apiBaseUrl, `/events/${encodeURIComponent(eventId)}/result`, {
+        await postJson(apiBaseUrl, apiToken, `/events/${encodeURIComponent(eventId)}/result`, {
           error: error instanceof Error ? error.message : String(error),
         });
         throw error;
@@ -152,6 +157,7 @@ function readCommand(payload: Record<string, unknown>): string {
 
 async function waitForApproval(
   apiBaseUrl: string,
+  apiToken: string | undefined,
   eventId: string,
   pollMs: number,
   timeoutMs: number,
@@ -162,7 +168,7 @@ async function waitForApproval(
     if (signal?.aborted) {
       throw new Error("Cortex Shield approval wait aborted");
     }
-    const event = await getJson(apiBaseUrl, `/events/${encodeURIComponent(eventId)}`);
+    const event = await getJson(apiBaseUrl, apiToken, `/events/${encodeURIComponent(eventId)}`);
     const status = readStringField(event, "approval_status");
     if (status === "approved") return;
     if (status === "rejected") throw new Error("tool call rejected by Cortex Shield");
@@ -171,21 +177,34 @@ async function waitForApproval(
   throw new Error("Cortex Shield approval timed out");
 }
 
-async function postJson(apiBaseUrl: string, path: string, body: unknown): Promise<unknown> {
+async function postJson(
+  apiBaseUrl: string,
+  apiToken: string | undefined,
+  path: string,
+  body: unknown,
+): Promise<unknown> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: authHeaders(apiToken, { "content-type": "application/json" }),
     body: JSON.stringify(body),
   });
   return readResponse(response);
 }
 
-async function getJson(apiBaseUrl: string, path: string): Promise<unknown> {
+async function getJson(
+  apiBaseUrl: string,
+  apiToken: string | undefined,
+  path: string,
+): Promise<unknown> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     method: "GET",
-    headers: { accept: "application/json" },
+    headers: authHeaders(apiToken, { accept: "application/json" }),
   });
   return readResponse(response);
+}
+
+function authHeaders(apiToken: string | undefined, base: Record<string, string>): Record<string, string> {
+  return apiToken ? { ...base, authorization: `Bearer ${apiToken}` } : base;
 }
 
 async function readResponse(response: Response): Promise<unknown> {

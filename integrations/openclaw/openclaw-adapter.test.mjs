@@ -55,6 +55,32 @@ describe("OpenClawAdapter", () => {
     assert.equal(calls[2].url, "http://127.0.0.1:8000/events/event-1/result");
   });
 
+  it("sends bearer token when configured", async () => {
+    const headers = [];
+    const adapter = new OpenClawAdapter({
+      runId: "run-1",
+      apiToken: "secret-token",
+      fetch: async (url, init) => {
+        headers.push(init?.headers);
+        if (url.endsWith("/guard/check")) {
+          return json({
+            event: { id: "event-1" },
+            decision: { action: "allow", reason: "risk accepted" },
+          });
+        }
+        return json({ ok: true });
+      },
+    });
+    const tool = adapter.wrapTool({
+      name: "exec",
+      execute: async () => ({ content: "ok" }),
+    });
+
+    await tool.execute("call-1", { command: "pwd" });
+
+    assert.equal(headers[0].authorization, "Bearer secret-token");
+  });
+
   it("blocks denied tool without calling original executor", async () => {
     let executed = false;
     const adapter = new OpenClawAdapter({

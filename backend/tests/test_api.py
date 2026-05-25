@@ -45,6 +45,20 @@ class ApiTests(unittest.TestCase):
 
             self.assertEqual(updated["output"], {"status": "simulated"})
 
+    def test_api_token_protects_runtime_routes_but_not_health(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = TraceStore(os.path.join(tmpdir, "traces.sqlite3"))
+            app = create_app(store=store, api_token="secret-token")
+            client = TestClient(app)
+
+            self.assertEqual(client.get("/health").status_code, 200)
+            self.assertEqual(client.get("/runs").status_code, 401)
+
+            authed = client.get("/runs", headers={"authorization": "Bearer secret-token"})
+
+            self.assertEqual(authed.status_code, 200)
+            self.assertEqual(authed.json(), {"runs": []})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,8 @@
+{
+  "reason_actions": {
+    "remote script execution": "block",
+    "privileged shell pattern": "require_approval",
+    "filesystem mutation": "require_approval",
+    "destructive shell pattern": "block"
+  }
+}

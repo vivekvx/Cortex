@@ -12,6 +12,7 @@ export type OpenClawTool = {
 export type OpenClawAdapterOptions = {
   runId: string;
   apiBaseUrl?: string;
+  apiToken?: string;
   fetch?: typeof fetch;
   approvalPollMs?: number;
   approvalTimeoutMs?: number;

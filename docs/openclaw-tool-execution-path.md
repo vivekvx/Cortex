@@ -52,4 +52,5 @@ Runtime enablement is env-driven:
 ```bash
 CORTEX_SHIELD_ENABLED=1
 CORTEX_API_BASE_URL=http://127.0.0.1:8000
+CORTEX_API_TOKEN=dev-secret
 ```

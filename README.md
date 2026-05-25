@@ -21,6 +21,14 @@ pip install -r requirements.txt
 uvicorn cortex_shield.api:app --reload
 ```
 
+Optional local API auth and policy config:
+
+```bash
+CORTEX_API_TOKEN=dev-secret \
+CORTEX_POLICY_PATH=/Users/vivek/cortex/config/policy.example.json \
+PYTHONPATH=backend python3 -m uvicorn cortex_shield.api:app --port 8000
+```
+
 ## Local Frontend
 
 ```bash
@@ -30,6 +38,7 @@ npm run dev
 ```
 
 Set `NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000` when backend runs elsewhere.
+Set `NEXT_PUBLIC_CORTEX_API_TOKEN=dev-secret` when `CORTEX_API_TOKEN` is enabled.
 
 ## Tests
 
@@ -60,6 +69,15 @@ Patch a local OpenClaw checkout so real sessions use Cortex:
 node integrations/openclaw/patch-openclaw.mjs /path/to/openclaw
 cd /path/to/openclaw
 CORTEX_SHIELD_ENABLED=1 CORTEX_API_BASE_URL=http://127.0.0.1:8000 pnpm test
+```
+
+When backend auth is enabled, pass the same token to OpenClaw:
+
+```bash
+CORTEX_SHIELD_ENABLED=1 \
+CORTEX_API_BASE_URL=http://127.0.0.1:8000 \
+CORTEX_API_TOKEN=dev-secret \
+openclaw
 ```
 
 Run the malicious-site demo after starting the backend:
