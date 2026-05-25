@@ -6,7 +6,7 @@
   "main": "./openclaw-adapter.mjs",
   "types": "./openclaw-adapter.d.ts",
   "scripts": {
-    "test": "node --test openclaw-adapter.test.mjs",
+    "test": "node --test openclaw-adapter.test.mjs patch-openclaw.test.mjs",
     "demo:malicious-site": "node malicious-site-demo.mjs"
   }
 }

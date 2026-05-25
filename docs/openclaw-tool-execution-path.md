@@ -19,7 +19,7 @@ Source studied: <https://github.com/openclaw/openclaw>
 
 ## Cortex Integration Choice
 
-For this repo, Cortex adds a standalone `OpenClawAdapter` instead of patching OpenClaw internals. It wraps OpenClaw-compatible tools at the `AnyAgentTool.execute` boundary:
+For this repo, Cortex adds both a standalone `OpenClawAdapter` and an OpenClaw patch script. Both wrap OpenClaw-compatible tools at the `AnyAgentTool.execute` boundary:
 
 ```js
 const adapter = new OpenClawAdapter({ runId, apiBaseUrl: "http://127.0.0.1:8000" });
@@ -33,3 +33,23 @@ This matches OpenClaw's tool contract and keeps integration small:
 - `browser` maps to Cortex `browser`.
 - High-risk decisions wait for `/approvals/{event_id}` to become approved.
 - Browser outputs are inspected before returning page content to the agent, so hidden prompt injection is blocked before the agent can act on it.
+
+## Live OpenClaw Patch Path
+
+Run this against a local OpenClaw checkout:
+
+```bash
+node integrations/openclaw/patch-openclaw.mjs /path/to/openclaw
+```
+
+The patch copies `cortex-shield-openclaw-wrapper.ts` into `src/agents/` and patches:
+
+- `src/agents/pi-tools.ts`: wraps the final `createOpenClawCodingTools(...)` tool list.
+- `src/agents/openclaw-tools.ts`: wraps `createOpenClawTools(...)` return paths used outside the coding-tool factory.
+
+Runtime enablement is env-driven:
+
+```bash
+CORTEX_SHIELD_ENABLED=1
+CORTEX_API_BASE_URL=http://127.0.0.1:8000
+```

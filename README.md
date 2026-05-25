@@ -54,6 +54,14 @@ const adapter = new OpenClawAdapter({
 const guardedTools = adapter.wrapTools(openClawTools);
 ```
 
+Patch a local OpenClaw checkout so real sessions use Cortex:
+
+```bash
+node integrations/openclaw/patch-openclaw.mjs /path/to/openclaw
+cd /path/to/openclaw
+CORTEX_SHIELD_ENABLED=1 CORTEX_API_BASE_URL=http://127.0.0.1:8000 pnpm test
+```
+
 Run the malicious-site demo after starting the backend:
 
 ```bash
