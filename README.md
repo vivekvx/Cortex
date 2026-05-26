@@ -14,6 +14,14 @@ Runtime security and observability layer for autonomous AI agents.
 
 ## Local Backend
 
+Fast path:
+
+```bash
+scripts/run-backend.sh
+```
+
+Manual path:
+
 ```bash
 cd backend
 python3 -m venv .venv
@@ -43,6 +51,14 @@ PID/memory/CPU limits, and timeout. If Docker is missing, sandbox execution fail
 
 ## Local Frontend
 
+Fast path:
+
+```bash
+scripts/run-frontend.sh
+```
+
+Manual path:
+
 ```bash
 cd frontend
 npm install
@@ -55,10 +71,19 @@ Set `NEXT_PUBLIC_CORTEX_API_TOKEN=dev-secret` when `CORTEX_API_TOKEN` is enabled
 ## Tests
 
 ```bash
+scripts/verify.sh
+```
+
+Or run checks manually:
+
+```bash
 PYTHONPATH=backend python3 -m unittest discover -s backend/tests -v
-node --test integrations/openclaw/openclaw-adapter.test.mjs
+node --test integrations/openclaw/openclaw-adapter.test.mjs integrations/openclaw/patch-openclaw.test.mjs
+frontend/node_modules/.bin/tsc --noEmit --target es2022 --lib es2022,dom --module nodenext --moduleResolution nodenext --types node --typeRoots frontend/node_modules/@types integrations/openclaw/cortex-shield-openclaw-wrapper.ts
 npm --prefix frontend run build
 ```
+
+Copy `.env.example` when you want a stable local config.
 
 ## OpenClaw Adapter
 
