@@ -10,7 +10,9 @@ Core loop:
 2. Cortex scores risk.
 3. Policy allows, blocks, or asks human approval.
 4. Approved risky shell commands can run in Docker sandbox.
-5. Trace saved for review.
+5. Browser/file outputs can become tainted sources.
+6. Later risky chains from tainted sources are blocked.
+7. Trace saved for review.
 
 ## Current System
 
@@ -27,6 +29,7 @@ Core loop:
 - Prompt-injection and credential-access hard blocks.
 - Human approval queue for high-risk actions.
 - Optional Docker shell sandbox through `CORTEX_SANDBOX_SHELL=1`.
+- Taint tracking for browser/file-read output.
 
 ## Run Backend
 
@@ -59,6 +62,6 @@ npm --prefix frontend run build
 
 ## Next Best Work
 
-Build taint tracking.
+Improve dashboard review flow.
 
-Goal: mark browser/page/file output as untrusted. If later shell/file/network action uses that untrusted data, Cortex blocks or requires approval.
+Goal: show clearer approval reasons, command blast radius, taint source, and sandbox result.

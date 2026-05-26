@@ -32,6 +32,15 @@ class RiskEngine:
         else:
             reasons.append("browser action")
 
+        if tool_call.payload.get("_cortex_tainted_source") is True:
+            reasons.append("tainted input chain")
+            if tool_call.tool in {ToolKind.SHELL, ToolKind.NETWORK}:
+                score = max(score, 95)
+            elif tool_call.tool == ToolKind.FILESYSTEM and tool_call.action.lower() in {"write", "edit", "delete"}:
+                score = max(score, 95)
+            else:
+                score = max(score, 70)
+
         if self._contains_prompt_injection(tool_call.payload):
             score = max(score, 95)
             reasons.append("prompt injection pattern")

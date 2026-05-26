@@ -15,6 +15,14 @@
 - Add PID, memory, CPU, and timeout limits.
 - Fail closed when Docker is unavailable.
 
+## Taint Tracking
+
+- Mark browser output as untrusted.
+- Mark file-read output as untrusted.
+- Track source event ID.
+- Block dangerous shell/file/network chains from tainted output.
+- Show taint metadata in event JSON.
+
 ## OpenClaw Integration
 
 - Wrap OpenClaw shell, browser, and file tools.
@@ -44,12 +52,10 @@
 - Integration tests use Node test runner.
 - Frontend verification uses `npm --prefix frontend run build`.
 
-## Next Skill To Add
+## Next Skill To Improve
 
-Taint tracking:
+Dashboard review:
 
-- Label browser and file output as untrusted.
-- Track source event ID.
-- Detect later shell/file/network use of untrusted content.
-- Block critical chains.
-- Show taint reason in dashboard.
+- Show taint source clearly.
+- Show sandbox status clearly.
+- Add approval reason and blast-radius preview.

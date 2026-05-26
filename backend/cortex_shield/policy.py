@@ -23,6 +23,12 @@ class PolicyEngine:
                 reason="prompt injection chain is blocked",
             )
 
+        if "tainted input chain" in reasons and assessment.level == RiskLevel.CRITICAL:
+            return PolicyDecision(
+                action=DecisionAction.BLOCK,
+                reason="tainted input chain is blocked",
+            )
+
         for reason in assessment.reasons:
             configured_action = self.config.reason_actions.get(reason)
             if configured_action is not None:

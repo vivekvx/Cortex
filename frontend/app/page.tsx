@@ -31,6 +31,10 @@ type TraceEvent = {
   };
   approval_status?: string | null;
   created_at?: string;
+  taint?: {
+    kind?: string;
+    source_event_id?: string;
+  } | null;
 };
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -210,6 +214,11 @@ export default function Home() {
                   </div>
                   <code>{JSON.stringify(event.tool_call.payload)}</code>
                   <p>{event.assessment.reasons.join(" / ")}</p>
+                  {event.taint ? (
+                    <p>
+                      taint: {event.taint.kind} from {event.taint.source_event_id?.slice(0, 8)}
+                    </p>
+                  ) : null}
                 </div>
               </article>
             ))}

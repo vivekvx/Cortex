@@ -68,7 +68,7 @@ class TraceStore:
                 (
                     event.id,
                     event.run_id,
-                    json.dumps(tool_call.to_dict()),
+                    json.dumps(self._public_tool_call(tool_call)),
                     json.dumps(assessment.to_dict()),
                     json.dumps(decision.to_dict()),
                     event.approval_status,
@@ -97,12 +97,28 @@ class TraceStore:
         output: Optional[Any] = None,
         error: Optional[str] = None,
     ) -> Optional[TraceEvent]:
+        event = self.get_event(event_id)
+        taint = self._taint_for_result(event) if event and error is None else None
         with self._connect() as db:
             db.execute(
-                "update events set output = ?, error = ? where id = ?",
-                (json.dumps(output), error, event_id),
+                "update events set output = ?, error = ?, taint_kind = ?, taint_source_event_id = ? where id = ?",
+                (
+                    json.dumps(output),
+                    error,
+                    taint["kind"] if taint else None,
+                    taint["source_event_id"] if taint else None,
+                    event_id,
+                ),
             )
         return self.get_event(event_id)
+
+    def is_tainted_event(self, event_id: str) -> bool:
+        with self._connect() as db:
+            row = db.execute(
+                "select 1 from events where id = ? and taint_source_event_id is not null",
+                (event_id,),
+            ).fetchone()
+        return row is not None
 
     def pending_approvals(self) -> List[TraceEvent]:
         with self._connect() as db:
@@ -143,10 +159,14 @@ class TraceStore:
                     approval_status text,
                     output text,
                     error text,
+                    taint_kind text,
+                    taint_source_event_id text,
                     created_at text not null default current_timestamp
                 )
                 """
             )
+            self._ensure_column(db, "events", "taint_kind", "text")
+            self._ensure_column(db, "events", "taint_source_event_id", "text")
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path)
@@ -173,5 +193,35 @@ class TraceStore:
             approval_status=row["approval_status"],
             output=json.loads(row["output"]) if row["output"] else None,
             error=row["error"],
+            taint=self._taint_from_row(row),
             created_at=row["created_at"],
         )
+
+    def _taint_for_result(self, event: Optional[TraceEvent]) -> Optional[dict[str, str]]:
+        if event is None:
+            return None
+        if event.tool_call.tool.value == "browser":
+            return {"kind": "browser_output", "source_event_id": event.id}
+        if event.tool_call.tool.value == "filesystem" and event.tool_call.action.lower() == "read":
+            return {"kind": "file_read_output", "source_event_id": event.id}
+        return None
+
+    def _public_tool_call(self, tool_call: ToolCall) -> dict[str, Any]:
+        raw = tool_call.to_dict()
+        raw["payload"] = {
+            key: value for key, value in raw["payload"].items() if key != "_cortex_tainted_source"
+        }
+        return raw
+
+    def _taint_from_row(self, row: sqlite3.Row) -> Optional[dict[str, str]]:
+        if not row["taint_source_event_id"]:
+            return None
+        return {
+            "kind": row["taint_kind"],
+            "source_event_id": row["taint_source_event_id"],
+        }
+
+    def _ensure_column(self, db: sqlite3.Connection, table: str, column: str, column_type: str) -> None:
+        columns = [row["name"] for row in db.execute(f"pragma table_info({table})").fetchall()]
+        if column not in columns:
+            db.execute(f"alter table {table} add column {column} {column_type}")

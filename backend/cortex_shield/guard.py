@@ -20,6 +20,7 @@ class CortexGuard:
         self.policy_engine = policy_engine or PolicyEngine()
 
     def check(self, run_id: str, tool_call: ToolCall) -> ExecutionResult:
+        tool_call = self._attach_taint_context(tool_call)
         assessment = self.risk_engine.assess(tool_call)
         decision = self.policy_engine.decide(tool_call, assessment)
         event = self.store.record_event(run_id, tool_call, assessment, decision)
@@ -31,6 +32,7 @@ class CortexGuard:
         tool_call: ToolCall,
         executor: Callable[[ToolCall], Any],
     ) -> ExecutionResult:
+        tool_call = self._attach_taint_context(tool_call)
         assessment = self.risk_engine.assess(tool_call)
         decision = self.policy_engine.decide(tool_call, assessment)
 
@@ -45,3 +47,13 @@ class CortexGuard:
         except Exception as exc:
             event = self.store.record_event(run_id, tool_call, assessment, decision, error=str(exc))
             return ExecutionResult(event=event, assessment=assessment, decision=decision, error=str(exc))
+
+    def _attach_taint_context(self, tool_call: ToolCall) -> ToolCall:
+        source_event_id = tool_call.payload.get("source_event_id")
+        if not isinstance(source_event_id, str) or not self.store.is_tainted_event(source_event_id):
+            return tool_call
+        return ToolCall(
+            tool=tool_call.tool,
+            action=tool_call.action,
+            payload={**tool_call.payload, "_cortex_tainted_source": True},
+        )

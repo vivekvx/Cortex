@@ -34,6 +34,7 @@ export class OpenClawAdapter {
     this.approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     this.sandboxShell = options.sandboxShell ?? process.env.CORTEX_SANDBOX_SHELL === "1";
+    this.taintSources = [];
 
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch implementation required");
@@ -53,7 +54,7 @@ export class OpenClawAdapter {
     return {
       ...tool,
       async execute(toolCallId, params, signal, onUpdate) {
-        const mappedCall = mapOpenClawToolCall(tool.name, params);
+        const mappedCall = adapter.attachTaintSource(mapOpenClawToolCall(tool.name, params));
         const check = await adapter.check(mappedCall);
         const decision = check.decision?.action;
         const event = check.event;
@@ -89,6 +90,7 @@ export class OpenClawAdapter {
               throw new CortexShieldBlockedError(outputCheck.decision.reason, outputCheck.event);
             }
           }
+          adapter.rememberTaintSource(tool.name, mappedCall.action, output, event.id);
           await adapter.recordResult(event.id, { output });
           return output;
         } catch (error) {
@@ -113,6 +115,52 @@ export class OpenClawAdapter {
 
   shouldUseShellSandbox(toolName, approved) {
     return this.sandboxShell && approved && SHELL_TOOLS.has(toolName);
+  }
+
+  attachTaintSource(toolCall) {
+    if (toolCall.payload?.source_event_id || toolCall.tool === "browser") {
+      return toolCall;
+    }
+
+    const sourceEventId = this.findTaintSource(toolCall.payload);
+    if (!sourceEventId) {
+      return toolCall;
+    }
+
+    return {
+      ...toolCall,
+      payload: {
+        ...toolCall.payload,
+        source_event_id: sourceEventId,
+      },
+    };
+  }
+
+  rememberTaintSource(toolName, action, output, eventId) {
+    if (toolName !== "browser" && !(toolName === "read" && action === "read")) {
+      return;
+    }
+
+    for (const text of flattenText(output)) {
+      const normalized = text.trim();
+      if (normalized.length >= 8) {
+        this.taintSources.push({ eventId, text: normalized });
+      }
+    }
+  }
+
+  findTaintSource(payload) {
+    const payloadText = flattenText(payload).join("\n");
+    if (!payloadText) {
+      return undefined;
+    }
+
+    for (const source of this.taintSources) {
+      if (payloadText.includes(source.text) || source.text.includes(payloadText)) {
+        return source.eventId;
+      }
+    }
+    return undefined;
   }
 
   async waitForApproval(eventId, signal) {
@@ -206,6 +254,19 @@ function normalizeParams(params) {
     return {};
   }
   return params;
+}
+
+function flattenText(value) {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenText(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap((item) => flattenText(item));
+  }
+  return [];
 }
 
 async function readJsonResponse(response) {

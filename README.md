@@ -9,6 +9,7 @@ Runtime security and observability layer for autonomous AI agents.
 - Block credential exfiltration and prompt-injection chains.
 - Pause high-risk actions for human approval.
 - Persist execution traces in SQLite.
+- Mark browser/file-read output as tainted and block dangerous follow-up chains.
 - Show runs, events, and approvals in a thin Next.js dashboard.
 
 ## Local Backend

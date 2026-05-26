@@ -81,6 +81,7 @@ class TraceEvent:
     approval_status: Optional[str] = None
     output: Optional[Any] = None
     error: Optional[str] = None
+    taint: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -92,6 +93,7 @@ class TraceEvent:
             "approval_status": self.approval_status,
             "output": self.output,
             "error": self.error,
+            "taint": self.taint,
             "created_at": self.created_at,
         }
 

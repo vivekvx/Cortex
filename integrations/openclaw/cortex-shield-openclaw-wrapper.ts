@@ -19,6 +19,11 @@ type CortexOptions = {
   sandboxShell?: boolean;
 };
 
+type TaintSource = {
+  eventId: string;
+  text: string;
+};
+
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
 const DEFAULT_APPROVAL_POLL_MS = 1000;
 const DEFAULT_APPROVAL_TIMEOUT_MS = 5 * 60 * 1000;
@@ -39,7 +44,8 @@ export function wrapToolsWithCortexShield<T extends CortexTool>(
     return tools;
   }
 
-  return tools.map((tool) => wrapTool(tool, runId, options));
+  const taintSources: TaintSource[] = [];
+  return tools.map((tool) => wrapTool(tool, runId, options, taintSources));
 }
 
 function isCortexShieldEnabled(options: CortexOptions): boolean {
@@ -50,7 +56,12 @@ function isCortexShieldEnabled(options: CortexOptions): boolean {
   return value === "1" || value === "true" || value === "yes";
 }
 
-function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexOptions): T {
+function wrapTool<T extends CortexTool>(
+  tool: T,
+  runId: string,
+  options: CortexOptions,
+  taintSources: TaintSource[],
+): T {
   if (!WATCHED_TOOLS.has(tool.name) || typeof tool.execute !== "function") {
     return tool;
   }
@@ -66,7 +77,7 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
   return {
     ...tool,
     async execute(toolCallId, params, signal, onUpdate) {
-      const mappedCall = mapOpenClawToolCall(tool.name, params);
+      const mappedCall = attachTaintSource(mapOpenClawToolCall(tool.name, params), taintSources);
       const check = await postJson(apiBaseUrl, apiToken, "/guard/check", {
         run_id: runId,
         ...mappedCall,
@@ -108,6 +119,7 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
           }
         }
 
+        rememberTaintSource(tool.name, mappedCall.action, output, eventId, taintSources);
         await postJson(apiBaseUrl, apiToken, `/events/${encodeURIComponent(eventId)}/result`, { output });
         return output;
       } catch (error) {
@@ -118,6 +130,61 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
       }
     },
   };
+}
+
+function attachTaintSource(
+  toolCall: ReturnType<typeof mapOpenClawToolCall>,
+  taintSources: TaintSource[],
+): ReturnType<typeof mapOpenClawToolCall> {
+  if (typeof toolCall.payload.source_event_id === "string" || toolCall.tool === "browser") {
+    return toolCall;
+  }
+
+  const sourceEventId = findTaintSource(toolCall.payload, taintSources);
+  if (!sourceEventId) {
+    return toolCall;
+  }
+
+  return {
+    ...toolCall,
+    payload: {
+      ...toolCall.payload,
+      source_event_id: sourceEventId,
+    },
+  };
+}
+
+function rememberTaintSource(
+  toolName: string,
+  action: string,
+  output: unknown,
+  eventId: string,
+  taintSources: TaintSource[],
+): void {
+  if (toolName !== "browser" && !(toolName === "read" && action === "read")) {
+    return;
+  }
+
+  for (const text of flattenText(output)) {
+    const normalized = text.trim();
+    if (normalized.length >= 8) {
+      taintSources.push({ eventId, text: normalized });
+    }
+  }
+}
+
+function findTaintSource(payload: unknown, taintSources: TaintSource[]): string | undefined {
+  const payloadText = flattenText(payload).join("\n");
+  if (!payloadText) {
+    return undefined;
+  }
+
+  for (const source of taintSources) {
+    if (payloadText.includes(source.text) || source.text.includes(payloadText)) {
+      return source.eventId;
+    }
+  }
+  return undefined;
 }
 
 function mapOpenClawToolCall(toolName: string, params: unknown) {
@@ -163,6 +230,19 @@ function readCommand(payload: Record<string, unknown>): string {
   if (typeof payload.cmd === "string") return payload.cmd;
   if (typeof payload.script === "string") return payload.script;
   return "";
+}
+
+function flattenText(value: unknown): string[] {
+  if (typeof value === "string") {
+    return [value];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenText(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.values(value as Record<string, unknown>).flatMap((item) => flattenText(item));
+  }
+  return [];
 }
 
 async function waitForApproval(
