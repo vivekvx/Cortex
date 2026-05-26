@@ -21,6 +21,7 @@ Core loop:
 - OpenClaw integration: `integrations/openclaw`.
 - Policy config: `config/policy.example.json`.
 - Traces: SQLite.
+- Gateway mode: Cortex executes tools server-side.
 
 ## Main Safety Features
 
@@ -30,6 +31,7 @@ Core loop:
 - Human approval queue for high-risk actions.
 - Optional Docker shell sandbox through `CORTEX_SANDBOX_SHELL=1`.
 - Taint tracking for browser/file-read output.
+- Gateway execution through `CORTEX_GATEWAY_TOOLS=1`.
 
 ## Run Backend
 
@@ -62,6 +64,6 @@ npm --prefix frontend run build
 
 ## Next Best Work
 
-Improve dashboard review flow.
+Improve gateway coverage.
 
-Goal: show clearer approval reasons, command blast radius, taint source, and sandbox result.
+Goal: move every real tool execution through Cortex-owned gateway paths, then add Hermes as another client.

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -8,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from cortex_shield.guard import CortexGuard
-from cortex_shield.models import ToolCall
+from cortex_shield.models import DecisionAction, ExecutionResult, ToolCall, ToolKind
 from cortex_shield.policy import PolicyEngine
 from cortex_shield.policy_config import load_policy_config
 from cortex_shield.risk import RiskEngine
@@ -37,6 +38,29 @@ class SandboxShellRequest(BaseModel):
     command: str
 
 
+class GatewayShellRequest(BaseModel):
+    run_id: str
+    command: str
+    source_event_id: Optional[str] = None
+    approved_event_id: Optional[str] = None
+
+
+class GatewayFilesystemRequest(BaseModel):
+    run_id: str
+    action: str
+    path: str
+    content: Optional[str] = None
+    source_event_id: Optional[str] = None
+
+
+class GatewayBrowserRequest(BaseModel):
+    run_id: str
+    action: str
+    url: Optional[str] = None
+    content: Optional[str] = None
+    source_event_id: Optional[str] = None
+
+
 class ApprovalRequest(BaseModel):
     approved: bool
 
@@ -45,6 +69,7 @@ def create_app(
     store: TraceStore | None = None,
     api_token: Optional[str] = None,
     sandbox_runner: Optional[Any] = None,
+    gateway_workspace_root: Optional[str] = None,
 ) -> FastAPI:
     app = FastAPI(title="Cortex Shield Runtime", version="0.1.0")
     app.add_middleware(
@@ -65,7 +90,10 @@ def create_app(
         risk_engine=RiskEngine(),
         policy_engine=PolicyEngine(config=policy_config),
     )
-    shell_sandbox = sandbox_runner or DockerShellSandbox().run
+    sandbox_image = os.environ.get("CORTEX_SANDBOX_IMAGE", "alpine:3.20")
+    shell_sandbox = sandbox_runner or DockerShellSandbox(image=sandbox_image).run
+    workspace_root = Path(gateway_workspace_root or os.environ.get("CORTEX_GATEWAY_WORKSPACE", ".")).resolve()
+    workspace_root.mkdir(parents=True, exist_ok=True)
 
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if not resolved_api_token:
@@ -120,12 +148,66 @@ def create_app(
         except SandboxUnavailableError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    @app.post("/gateway/tools/shell")
+    def gateway_shell(request: GatewayShellRequest, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
+        ensure_run(request.run_id)
+        if request.approved_event_id:
+            return resume_approved_shell(request.run_id, request.approved_event_id, request.command)
+        payload = {"command": request.command}
+        if request.source_event_id:
+            payload["source_event_id"] = request.source_event_id
+        tool_call = ToolCall(tool=ToolKind.SHELL, action="run", payload=payload)
+        result = guard.execute(run_id=request.run_id, tool_call=tool_call, executor=lambda _call: shell_sandbox(request.command))
+        return result.to_dict()
+
+    @app.post("/gateway/tools/filesystem")
+    def gateway_filesystem(request: GatewayFilesystemRequest, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
+        ensure_run(request.run_id)
+        resolved_path = resolve_gateway_path(request.path)
+        payload: Dict[str, Any] = {"path": request.path}
+        if request.content is not None:
+            payload["content"] = request.content
+        if request.source_event_id:
+            payload["source_event_id"] = request.source_event_id
+        tool_call = ToolCall(tool=ToolKind.FILESYSTEM, action=request.action, payload=payload)
+        result = guard.execute(
+            run_id=request.run_id,
+            tool_call=tool_call,
+            executor=lambda _call: execute_filesystem(request.action, resolved_path, request.content),
+        )
+        return result.to_dict()
+
+    @app.post("/gateway/tools/browser")
+    def gateway_browser(request: GatewayBrowserRequest, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
+        ensure_run(request.run_id)
+        payload: Dict[str, Any] = {"url": request.url, "content": request.content}
+        if request.source_event_id:
+            payload["source_event_id"] = request.source_event_id
+        tool_call = ToolCall(tool=ToolKind.BROWSER, action=request.action, payload=payload)
+        result = guard.execute(
+            run_id=request.run_id,
+            tool_call=tool_call,
+            executor=lambda _call: {
+                "status": "simulated",
+                "action": request.action,
+                "url": request.url,
+                "content": request.content or "",
+            },
+        )
+        return result.to_dict()
+
     @app.get("/events/{event_id}")
     def get_event(event_id: str, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
         event = trace_store.get_event(event_id)
         if event is None:
             raise HTTPException(status_code=404, detail="event not found")
         return event.to_dict()
+
+    @app.get("/events/{event_id}/taint-graph")
+    def get_taint_graph(event_id: str, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
+        if trace_store.get_event(event_id) is None:
+            raise HTTPException(status_code=404, detail="event not found")
+        return trace_store.taint_graph(event_id)
 
     @app.post("/events/{event_id}/result")
     def record_result(
@@ -152,6 +234,43 @@ def create_app(
         if event is None:
             raise HTTPException(status_code=404, detail="event not found")
         return event.to_dict()
+
+    def ensure_run(run_id: str) -> None:
+        if trace_store.get_run(run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+
+    def resume_approved_shell(run_id: str, event_id: str, command: str) -> Dict[str, Any]:
+        event = trace_store.get_event(event_id)
+        if event is None or event.run_id != run_id:
+            raise HTTPException(status_code=404, detail="approved event not found")
+        if event.approval_status != "approved":
+            raise HTTPException(status_code=409, detail="event is not approved")
+        if event.tool_call.tool != ToolKind.SHELL or event.tool_call.payload.get("command") != command:
+            raise HTTPException(status_code=400, detail="approved event does not match shell command")
+        output = shell_sandbox(command)
+        updated = trace_store.record_result(event_id, output=output)
+        return ExecutionResult(
+            event=updated or event,
+            assessment=event.assessment,
+            decision=event.decision,
+            output=output,
+        ).to_dict()
+
+    def resolve_gateway_path(raw_path: str) -> Path:
+        path = (workspace_root / raw_path).resolve()
+        if path != workspace_root and workspace_root not in path.parents:
+            raise HTTPException(status_code=400, detail="path escapes gateway workspace")
+        return path
+
+    def execute_filesystem(action: str, path: Path, content: Optional[str]) -> Dict[str, Any]:
+        normalized = action.lower()
+        if normalized == "read":
+            return {"status": "completed", "path": str(path), "content": path.read_text() if path.exists() else ""}
+        if normalized in {"write", "edit"}:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content or "")
+            return {"status": "completed", "path": str(path), "bytes": len(content or "")}
+        raise HTTPException(status_code=400, detail="unsupported filesystem action")
 
     return app
 

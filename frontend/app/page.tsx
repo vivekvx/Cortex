@@ -31,6 +31,8 @@ type TraceEvent = {
   };
   approval_status?: string | null;
   created_at?: string;
+  output?: unknown;
+  error?: string | null;
   taint?: {
     kind?: string;
     source_event_id?: string;
@@ -213,7 +215,14 @@ export default function Home() {
                     <span className={`decision ${event.decision.action}`}>{event.decision.action}</span>
                   </div>
                   <code>{JSON.stringify(event.tool_call.payload)}</code>
-                  <p>{event.assessment.reasons.join(" / ")}</p>
+                  <p>reason: {event.decision.reason}</p>
+                  <p>risk: {event.assessment.reasons.join(" / ")}</p>
+                  {typeof event.tool_call.payload.source_event_id === "string" ? (
+                    <p>taint chain source: {event.tool_call.payload.source_event_id.slice(0, 8)}</p>
+                  ) : null}
+                  {readSandboxMode(event.output) ? <p>sandbox: {readSandboxMode(event.output)}</p> : null}
+                  {event.output ? <p>output: {shortJson(event.output)}</p> : null}
+                  {event.error ? <p>error: {event.error}</p> : null}
                   {event.taint ? (
                     <p>
                       taint: {event.taint.kind} from {event.taint.source_event_id?.slice(0, 8)}
@@ -232,6 +241,8 @@ export default function Home() {
             <div className="approval" key={event.id}>
               <strong>{event.tool_call.action}</strong>
               <code>{JSON.stringify(event.tool_call.payload)}</code>
+              <p>{event.decision.reason}</p>
+              <p>{event.assessment.reasons.join(" / ")}</p>
               <div className="approval-actions">
                 <button aria-label="Approve" onClick={() => resolveApproval(event.id, true)}>
                   <Check size={15} aria-hidden />
@@ -262,6 +273,19 @@ function authHeaders(headers: HeadersInit | undefined): HeadersInit {
     merged.set("authorization", `Bearer ${API_TOKEN}`);
   }
   return merged;
+}
+
+function shortJson(value: unknown): string {
+  const text = JSON.stringify(value);
+  return text.length > 180 ? `${text.slice(0, 180)}...` : text;
+}
+
+function readSandboxMode(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const sandbox = (value as Record<string, unknown>).sandbox;
+  if (!sandbox || typeof sandbox !== "object") return undefined;
+  const engine = (sandbox as Record<string, unknown>).engine;
+  return typeof engine === "string" ? engine : undefined;
 }
 
 function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: number }) {

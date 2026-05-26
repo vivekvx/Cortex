@@ -34,6 +34,7 @@ export class OpenClawAdapter {
     this.approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
     this.sandboxShell = options.sandboxShell ?? process.env.CORTEX_SANDBOX_SHELL === "1";
+    this.gatewayTools = options.gatewayTools ?? process.env.CORTEX_GATEWAY_TOOLS === "1";
     this.taintSources = [];
 
     if (typeof this.fetchImpl !== "function") {
@@ -55,6 +56,9 @@ export class OpenClawAdapter {
       ...tool,
       async execute(toolCallId, params, signal, onUpdate) {
         const mappedCall = adapter.attachTaintSource(mapOpenClawToolCall(tool.name, params));
+        if (adapter.gatewayTools) {
+          return await adapter.executeGatewayTool(tool.name, mappedCall, signal);
+        }
         const check = await adapter.check(mappedCall);
         const decision = check.decision?.action;
         const event = check.event;
@@ -115,6 +119,35 @@ export class OpenClawAdapter {
 
   shouldUseShellSandbox(toolName, approved) {
     return this.sandboxShell && approved && SHELL_TOOLS.has(toolName);
+  }
+
+  async executeGatewayTool(toolName, mappedCall, signal) {
+    const response = await this.postJson(gatewayPath(mappedCall.tool), gatewayBody(this.runId, mappedCall));
+    const decision = response.decision?.action;
+    const event = response.event;
+
+    if (decision === "block") {
+      throw new CortexShieldBlockedError(response.decision.reason, event);
+    }
+
+    if (decision === "require_approval") {
+      const approvedEvent = await this.waitForApproval(event.id, signal);
+      if (approvedEvent.approval_status !== "approved") {
+        throw new CortexShieldApprovalError("tool call rejected by Cortex Shield", approvedEvent);
+      }
+      if (SHELL_TOOLS.has(toolName)) {
+        const resumed = await this.postJson("/gateway/tools/shell", {
+          run_id: this.runId,
+          command: mappedCall.payload.command,
+          approved_event_id: event.id,
+        });
+        return resumed.output;
+      }
+      return response.output;
+    }
+
+    this.rememberTaintSource(toolName, mappedCall.action, response.output, event.id);
+    return response.output;
   }
 
   attachTaintSource(toolCall) {
@@ -254,6 +287,31 @@ function normalizeParams(params) {
     return {};
   }
   return params;
+}
+
+function gatewayPath(tool) {
+  if (tool === "shell") return "/gateway/tools/shell";
+  if (tool === "filesystem") return "/gateway/tools/filesystem";
+  if (tool === "browser") return "/gateway/tools/browser";
+  return "/gateway/tools/network";
+}
+
+function gatewayBody(runId, mappedCall) {
+  const payload = mappedCall.payload ?? {};
+  const body = { run_id: runId };
+  if (payload.source_event_id) {
+    body.source_event_id = payload.source_event_id;
+  }
+  if (mappedCall.tool === "shell") {
+    return { ...body, command: payload.command ?? "" };
+  }
+  if (mappedCall.tool === "filesystem") {
+    return { ...body, action: mappedCall.action, path: payload.path ?? "", content: payload.content };
+  }
+  if (mappedCall.tool === "browser") {
+    return { ...body, action: mappedCall.action, url: payload.url, content: payload.content };
+  }
+  return { ...body, action: mappedCall.action, payload };
 }
 
 function flattenText(value) {

@@ -17,6 +17,7 @@ export type OpenClawAdapterOptions = {
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
   sandboxShell?: boolean;
+  gatewayTools?: boolean;
 };
 
 export class CortexShieldBlockedError extends Error {

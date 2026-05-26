@@ -17,6 +17,7 @@ type CortexOptions = {
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
   sandboxShell?: boolean;
+  gatewayTools?: boolean;
 };
 
 type TaintSource = {
@@ -73,11 +74,25 @@ function wrapTool<T extends CortexTool>(
   const approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
   const approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
   const sandboxShell = options.sandboxShell ?? process.env.CORTEX_SANDBOX_SHELL === "1";
+  const gatewayTools = options.gatewayTools ?? process.env.CORTEX_GATEWAY_TOOLS === "1";
 
   return {
     ...tool,
     async execute(toolCallId, params, signal, onUpdate) {
       const mappedCall = attachTaintSource(mapOpenClawToolCall(tool.name, params), taintSources);
+      if (gatewayTools) {
+        return executeGatewayTool(
+          apiBaseUrl,
+          apiToken,
+          runId,
+          tool.name,
+          mappedCall,
+          approvalPollMs,
+          approvalTimeoutMs,
+          signal,
+          taintSources,
+        );
+      }
       const check = await postJson(apiBaseUrl, apiToken, "/guard/check", {
         run_id: runId,
         ...mappedCall,
@@ -130,6 +145,42 @@ function wrapTool<T extends CortexTool>(
       }
     },
   };
+}
+
+async function executeGatewayTool(
+  apiBaseUrl: string,
+  apiToken: string | undefined,
+  runId: string,
+  toolName: string,
+  mappedCall: ReturnType<typeof mapOpenClawToolCall>,
+  approvalPollMs: number,
+  approvalTimeoutMs: number,
+  signal: AbortSignal | undefined,
+  taintSources: TaintSource[],
+): Promise<unknown> {
+  const response = await postJson(apiBaseUrl, apiToken, gatewayPath(mappedCall.tool), gatewayBody(runId, mappedCall));
+  const decision = readDecisionAction(response);
+  const eventId = readEventId(response);
+
+  if (decision === "block") {
+    throw new Error(readDecisionReason(response) ?? "blocked by Cortex Shield");
+  }
+
+  if (decision === "require_approval") {
+    await waitForApproval(apiBaseUrl, apiToken, eventId, approvalPollMs, approvalTimeoutMs, signal);
+    if (SHELL_TOOLS.has(toolName)) {
+      const resumed = await postJson(apiBaseUrl, apiToken, "/gateway/tools/shell", {
+        run_id: runId,
+        command: readCommand(mappedCall.payload),
+        approved_event_id: eventId,
+      });
+      return readObjectField(resumed, "output");
+    }
+  }
+
+  const output = readObjectField(response, "output");
+  rememberTaintSource(toolName, mappedCall.action, output, eventId, taintSources);
+  return output;
 }
 
 function attachTaintSource(
@@ -232,6 +283,36 @@ function readCommand(payload: Record<string, unknown>): string {
   return "";
 }
 
+function gatewayPath(tool: string): string {
+  if (tool === "shell") return "/gateway/tools/shell";
+  if (tool === "filesystem") return "/gateway/tools/filesystem";
+  if (tool === "browser") return "/gateway/tools/browser";
+  return "/gateway/tools/network";
+}
+
+function gatewayBody(runId: string, mappedCall: ReturnType<typeof mapOpenClawToolCall>): Record<string, unknown> {
+  const payload = mappedCall.payload;
+  const body: Record<string, unknown> = { run_id: runId };
+  if (typeof payload.source_event_id === "string") {
+    body.source_event_id = payload.source_event_id;
+  }
+  if (mappedCall.tool === "shell") {
+    return { ...body, command: readCommand(payload) };
+  }
+  if (mappedCall.tool === "filesystem") {
+    return {
+      ...body,
+      action: mappedCall.action,
+      path: typeof payload.path === "string" ? payload.path : "",
+      content: payload.content,
+    };
+  }
+  if (mappedCall.tool === "browser") {
+    return { ...body, action: mappedCall.action, url: payload.url, content: payload.content };
+  }
+  return { ...body, action: mappedCall.action, payload };
+}
+
 function flattenText(value: unknown): string[] {
   if (typeof value === "string") {
     return [value];
@@ -331,6 +412,11 @@ function readStringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== "object") return undefined;
   const field = (value as Record<string, unknown>)[key];
   return typeof field === "string" ? field : undefined;
+}
+
+function readObjectField(value: unknown, key: string): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  return (value as Record<string, unknown>)[key];
 }
 
 function trimTrailingSlash(value: string): string {

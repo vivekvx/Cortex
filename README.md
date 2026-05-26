@@ -75,6 +75,20 @@ const adapter = new OpenClawAdapter({
 const guardedTools = adapter.wrapTools(openClawTools);
 ```
 
+Gateway mode makes Cortex execute tools server-side instead of trusting the agent
+process to run them locally:
+
+```bash
+CORTEX_GATEWAY_TOOLS=1 openclaw
+```
+
+Gateway endpoints:
+
+- `POST /gateway/tools/shell`
+- `POST /gateway/tools/filesystem`
+- `POST /gateway/tools/browser`
+- `GET /events/{event_id}/taint-graph`
+
 Patch a local OpenClaw checkout so real sessions use Cortex:
 
 ```bash

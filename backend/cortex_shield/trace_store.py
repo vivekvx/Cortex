@@ -76,6 +76,15 @@ class TraceStore:
                     error,
                 ),
             )
+            source_event_id = tool_call.payload.get("source_event_id")
+            if isinstance(source_event_id, str) and self.is_tainted_event(source_event_id):
+                db.execute(
+                    """
+                    insert into taint_edges (source_event_id, target_event_id)
+                    values (?, ?)
+                    """,
+                    (source_event_id, event.id),
+                )
         return self.get_event(event.id) or event
 
     def list_events(self, run_id: str) -> List[TraceEvent]:
@@ -119,6 +128,24 @@ class TraceStore:
                 (event_id,),
             ).fetchone()
         return row is not None
+
+    def taint_graph(self, event_id: str) -> dict[str, Any]:
+        with self._connect() as db:
+            rows = db.execute(
+                """
+                select source_event_id, target_event_id
+                from taint_edges
+                where source_event_id = ? or target_event_id = ?
+                order by created_at asc
+                """,
+                (event_id, event_id),
+            ).fetchall()
+        edges = [
+            {"source_event_id": row["source_event_id"], "target_event_id": row["target_event_id"]}
+            for row in rows
+        ]
+        node_ids = sorted({item for edge in edges for item in edge.values()})
+        return {"nodes": node_ids, "edges": edges}
 
     def pending_approvals(self) -> List[TraceEvent]:
         with self._connect() as db:
@@ -167,6 +194,16 @@ class TraceStore:
             )
             self._ensure_column(db, "events", "taint_kind", "text")
             self._ensure_column(db, "events", "taint_source_event_id", "text")
+            db.execute(
+                """
+                create table if not exists taint_edges (
+                    source_event_id text not null references events(id),
+                    target_event_id text not null references events(id),
+                    created_at text not null default current_timestamp,
+                    primary key (source_event_id, target_event_id)
+                )
+                """
+            )
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path)

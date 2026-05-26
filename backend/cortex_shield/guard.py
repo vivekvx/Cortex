@@ -42,7 +42,8 @@ class CortexGuard:
 
         try:
             output = executor(tool_call)
-            event = self.store.record_event(run_id, tool_call, assessment, decision, output=output)
+            event = self.store.record_event(run_id, tool_call, assessment, decision)
+            event = self.store.record_result(event.id, output=output) or event
             return ExecutionResult(event=event, assessment=assessment, decision=decision, output=output)
         except Exception as exc:
             event = self.store.record_event(run_id, tool_call, assessment, decision, error=str(exc))

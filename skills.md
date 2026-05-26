@@ -23,6 +23,14 @@
 - Block dangerous shell/file/network chains from tainted output.
 - Show taint metadata in event JSON.
 
+## Tool Gateway
+
+- Execute shell through Cortex gateway.
+- Execute filesystem inside controlled workspace root.
+- Simulate browser v1 while Cortex owns event provenance.
+- Store taint graph edges from source event to target event.
+- Keep agent adapters as clients, not trusted executors.
+
 ## OpenClaw Integration
 
 - Wrap OpenClaw shell, browser, and file tools.
