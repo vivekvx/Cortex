@@ -16,6 +16,7 @@ export type OpenClawAdapterOptions = {
   fetch?: typeof fetch;
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
+  sandboxShell?: boolean;
 };
 
 export class CortexShieldBlockedError extends Error {

@@ -29,6 +29,17 @@ CORTEX_POLICY_PATH=/Users/vivek/cortex/config/policy.example.json \
 PYTHONPATH=backend python3 -m uvicorn cortex_shield.api:app --port 8000
 ```
 
+Optional Docker shell sandbox:
+
+```bash
+CORTEX_SANDBOX_SHELL=1 \
+PYTHONPATH=backend python3 -m uvicorn cortex_shield.api:app --port 8000
+```
+
+When enabled in the OpenClaw adapter, approved high-risk shell commands run through
+`/sandbox/shell` inside a Docker container with no network, read-only filesystem,
+PID/memory/CPU limits, and timeout. If Docker is missing, sandbox execution fails closed.
+
 ## Local Frontend
 
 ```bash
@@ -77,6 +88,7 @@ When backend auth is enabled, pass the same token to OpenClaw:
 CORTEX_SHIELD_ENABLED=1 \
 CORTEX_API_BASE_URL=http://127.0.0.1:8000 \
 CORTEX_API_TOKEN=dev-secret \
+CORTEX_SANDBOX_SHELL=1 \
 openclaw
 ```
 

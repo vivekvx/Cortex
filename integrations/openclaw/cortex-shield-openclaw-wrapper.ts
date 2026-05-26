@@ -16,6 +16,7 @@ type CortexOptions = {
   enabled?: boolean;
   approvalPollMs?: number;
   approvalTimeoutMs?: number;
+  sandboxShell?: boolean;
 };
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000";
@@ -60,6 +61,7 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
   const apiToken = options.apiToken ?? process.env.CORTEX_API_TOKEN;
   const approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
   const approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+  const sandboxShell = options.sandboxShell ?? process.env.CORTEX_SANDBOX_SHELL === "1";
 
   return {
     ...tool,
@@ -76,12 +78,20 @@ function wrapTool<T extends CortexTool>(tool: T, runId: string, options: CortexO
         throw new Error(readDecisionReason(check) ?? "blocked by Cortex Shield");
       }
 
+      let approved = false;
       if (decision === "require_approval") {
         await waitForApproval(apiBaseUrl, apiToken, eventId, approvalPollMs, approvalTimeoutMs, signal);
+        approved = true;
       }
 
       try {
-        const output = await tool.execute(toolCallId, params, signal, onUpdate);
+        const output =
+          sandboxShell && approved && SHELL_TOOLS.has(tool.name)
+            ? await postJson(apiBaseUrl, apiToken, "/sandbox/shell", {
+                run_id: runId,
+                command: readCommand(mappedCall.payload),
+              })
+            : await tool.execute(toolCallId, params, signal, onUpdate);
         if (tool.name === "browser") {
           const outputCheck = await postJson(apiBaseUrl, apiToken, "/guard/check", {
             run_id: runId,

@@ -33,6 +33,7 @@ export class OpenClawAdapter {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
     this.approvalPollMs = options.approvalPollMs ?? DEFAULT_APPROVAL_POLL_MS;
     this.approvalTimeoutMs = options.approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS;
+    this.sandboxShell = options.sandboxShell ?? process.env.CORTEX_SANDBOX_SHELL === "1";
 
     if (typeof this.fetchImpl !== "function") {
       throw new Error("fetch implementation required");
@@ -61,15 +62,19 @@ export class OpenClawAdapter {
           throw new CortexShieldBlockedError(check.decision.reason, event);
         }
 
+        let approved = false;
         if (decision === "require_approval") {
           const approvedEvent = await adapter.waitForApproval(event.id, signal);
           if (approvedEvent.approval_status !== "approved") {
             throw new CortexShieldApprovalError("tool call rejected by Cortex Shield", approvedEvent);
           }
+          approved = true;
         }
 
         try {
-          const output = await tool.execute.call(this, toolCallId, params, signal, onUpdate);
+          const output = adapter.shouldUseShellSandbox(tool.name, approved)
+            ? await adapter.runShellSandbox(mappedCall.payload.command)
+            : await tool.execute.call(this, toolCallId, params, signal, onUpdate);
           if (tool.name === "browser") {
             const outputCheck = await adapter.check({
               tool: "browser",
@@ -100,6 +105,14 @@ export class OpenClawAdapter {
 
   async recordResult(eventId, result) {
     return await this.postJson(`/events/${encodeURIComponent(eventId)}/result`, result);
+  }
+
+  async runShellSandbox(command) {
+    return await this.postJson("/sandbox/shell", { run_id: this.runId, command });
+  }
+
+  shouldUseShellSandbox(toolName, approved) {
+    return this.sandboxShell && approved && SHELL_TOOLS.has(toolName);
   }
 
   async waitForApproval(eventId, signal) {

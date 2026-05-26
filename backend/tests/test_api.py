@@ -59,6 +59,42 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(authed.status_code, 200)
             self.assertEqual(authed.json(), {"runs": []})
 
+    def test_sandbox_shell_endpoint_runs_authenticated_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = TraceStore(os.path.join(tmpdir, "traces.sqlite3"))
+            app = create_app(
+                store=store,
+                api_token="secret-token",
+                sandbox_runner=lambda command: {"status": "completed", "stdout": command, "exit_code": 0},
+            )
+            client = TestClient(app)
+            run = client.post(
+                "/runs",
+                json={"name": "sandbox-test"},
+                headers={"authorization": "Bearer secret-token"},
+            ).json()
+
+            response = client.post(
+                "/sandbox/shell",
+                json={"run_id": run["id"], "command": "pwd"},
+                headers={"authorization": "Bearer secret-token"},
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["stdout"], "pwd")
+
+    def test_sandbox_shell_endpoint_rejects_unknown_run(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            app = create_app(
+                store=TraceStore(os.path.join(tmpdir, "traces.sqlite3")),
+                sandbox_runner=lambda command: {"status": "completed", "stdout": command, "exit_code": 0},
+            )
+            client = TestClient(app)
+
+            response = client.post("/sandbox/shell", json={"run_id": "missing", "command": "pwd"})
+
+            self.assertEqual(response.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

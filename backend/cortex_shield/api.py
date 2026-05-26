@@ -12,6 +12,7 @@ from cortex_shield.models import ToolCall
 from cortex_shield.policy import PolicyEngine
 from cortex_shield.policy_config import load_policy_config
 from cortex_shield.risk import RiskEngine
+from cortex_shield.sandbox import DockerShellSandbox, SandboxUnavailableError
 from cortex_shield.trace_store import TraceStore
 
 
@@ -31,11 +32,20 @@ class ToolResultRequest(BaseModel):
     error: Optional[str] = None
 
 
+class SandboxShellRequest(BaseModel):
+    run_id: str
+    command: str
+
+
 class ApprovalRequest(BaseModel):
     approved: bool
 
 
-def create_app(store: TraceStore | None = None, api_token: Optional[str] = None) -> FastAPI:
+def create_app(
+    store: TraceStore | None = None,
+    api_token: Optional[str] = None,
+    sandbox_runner: Optional[Any] = None,
+) -> FastAPI:
     app = FastAPI(title="Cortex Shield Runtime", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -55,6 +65,7 @@ def create_app(store: TraceStore | None = None, api_token: Optional[str] = None)
         risk_engine=RiskEngine(),
         policy_engine=PolicyEngine(config=policy_config),
     )
+    shell_sandbox = sandbox_runner or DockerShellSandbox().run
 
     def require_auth(authorization: Optional[str] = Header(default=None)) -> None:
         if not resolved_api_token:
@@ -99,6 +110,15 @@ def create_app(store: TraceStore | None = None, api_token: Optional[str] = None)
             raise HTTPException(status_code=404, detail="run not found")
         tool_call = ToolCall.from_dict(request.model_dump(exclude={"run_id"}))
         return guard.check(run_id=request.run_id, tool_call=tool_call).to_dict()
+
+    @app.post("/sandbox/shell")
+    def sandbox_shell(request: SandboxShellRequest, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
+        if trace_store.get_run(request.run_id) is None:
+            raise HTTPException(status_code=404, detail="run not found")
+        try:
+            return shell_sandbox(request.command)
+        except SandboxUnavailableError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     @app.get("/events/{event_id}")
     def get_event(event_id: str, _auth: None = Depends(require_auth)) -> Dict[str, Any]:
